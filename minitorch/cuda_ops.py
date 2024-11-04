@@ -157,7 +157,12 @@ def tensor_map(
         if i < out_size:
             to_index(i, out_shape, out_index)
             broadcast_index(out_index, out_shape, in_shape, in_index)
-            out[i] = fn(in_storage[index_to_position(in_index, in_strides)])
+
+            pos = 0
+            for j in range(len(in_index)):
+                pos += in_index[j] * in_strides[j]
+            
+            out[i] = fn(in_storage[pos])
 
     return cuda.jit()(_map)  # type: ignore
 
@@ -202,7 +207,16 @@ def tensor_zip(
             to_index(i, out_shape, out_index)
             broadcast_index(out_index, out_shape, a_shape, a_index)
             broadcast_index(out_index, out_shape, b_shape, b_index)
-            out[i] = fn(a_storage[index_to_position(a_index, a_strides)], b_storage[index_to_position(b_index, b_strides)])
+
+            a_pos = 0
+            for j in range(len(a_index)):
+                a_pos += a_index[j] * a_strides[j]
+            
+            b_pos = 0
+            for j in range(len(b_index)):
+                b_pos += b_index[j] * b_strides[j]
+
+            out[i] = fn(a_storage[a_pos], b_storage[b_pos])
 
 
     return cuda.jit()(_zip)  # type: ignore
@@ -293,9 +307,16 @@ def tensor_reduce(
 
         if pos < BLOCK_DIM and pos < a_shape[reduce_dim]:
             to_index(out_pos, out_shape, out_index)
-            out_position = index_to_position(out_index, out_strides)
+
+            out_position = 0
+            for j in range(len(out_index)):
+                out_position += out_index[j] * out_strides[j]
             out_index[reduce_dim] = pos
-            a_position = index_to_position(out_index, a_strides)
+
+            a_position = 0
+            for j in range(len(out_index)):
+                a_position += out_index[j] * a_strides[j]
+            
             cache[pos] = a_storage[a_position]
         cuda.syncthreads()
         if pos == 0:
@@ -436,17 +457,17 @@ def _tensor_matrix_multiply(
         #    a) Copy into shared memory for a matrix.
         a_shared[pj, pi] = 0.
         if j < out_shape[-2] and a_col_idx < shared_dim:
-            a_pos = index_to_position((batch, j, a_col_idx), (a_batch_stride, a_strides[-2], a_strides[-1]))
+            a_pos = batch * a_batch_stride + j * a_strides[-2] + a_col_idx * a_strides[-1]
             a_shared[pj, pi] = a_storage[a_pos]
             
         #    b) Copy into shared memory for b matrix
         b_shared[pj, pi] = 0.
         if i < out_shape[-1] and b_row_idx < shared_dim:
-            b_pos = index_to_position((batch, b_row_idx, i), (b_batch_stride, b_strides[-2], b_strides[-1]))
+            b_pos = batch * b_batch_stride + b_row_idx * b_strides[-2] + i * b_strides[-1]
             b_shared[pj, pi] = b_storage[b_pos]            
 
         cuda.syncthreads()
-        
+
         #    c) Compute the dot produce for position c[i, j].
         if j < out_shape[-2] and i < out_shape[-1]:
             for k in range(in_range):
@@ -454,7 +475,7 @@ def _tensor_matrix_multiply(
         cuda.syncthreads()
 
     if j < out_shape[-2] and i < out_shape[-1]:
-        out_pos = index_to_position((batch, j, i), out_strides)
+        out_pos = batch * out_strides[0] + j * out_strides[1] + i * out_strides[2]
         out[out_pos] = dot_prod
 
 tensor_matrix_multiply = cuda.jit(_tensor_matrix_multiply)
