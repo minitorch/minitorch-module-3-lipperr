@@ -9,7 +9,7 @@ import numpy.typing as npt
 from numpy import array, float64
 from typing_extensions import TypeAlias
 
-from .operators import prod
+from .operators import prod, mul, zipWith
 
 MAX_DIMS = 32
 
@@ -43,7 +43,7 @@ def index_to_position(index: Index, strides: Strides) -> int:
         Position in storage
     """
 
-    raise NotImplementedError("Need to include this file from past assignment.")
+    return np.sum(index * strides)
 
 
 def to_index(ordinal: int, shape: Shape, out_index: OutIndex) -> None:
@@ -59,7 +59,8 @@ def to_index(ordinal: int, shape: Shape, out_index: OutIndex) -> None:
         out_index : return index corresponding to position.
 
     """
-    raise NotImplementedError("Need to include this file from past assignment.")
+    for i in range(len(shape)-1, -1, -1):
+        out_index[i] = (ordinal // (np.prod(shape[i+1:]))) % shape[i]
 
 
 def broadcast_index(
@@ -81,7 +82,8 @@ def broadcast_index(
     Returns:
         None
     """
-    raise NotImplementedError("Need to include this file from past assignment.")
+    for i in range(len(out_index)):
+        out_index[i] = big_index[len(big_shape) - len(shape) + i] if shape[i] > 1 else 0
 
 
 def shape_broadcast(shape1: UserShape, shape2: UserShape) -> UserShape:
@@ -98,8 +100,18 @@ def shape_broadcast(shape1: UserShape, shape2: UserShape) -> UserShape:
     Raises:
         IndexingError : if cannot broadcast
     """
-    raise NotImplementedError("Need to include this file from past assignment.")
-
+    shape1_rev = shape1[::-1]
+    shape2_rev = shape2[::-1]
+    broadcasted_shape = [0] * max(len(shape1_rev), len(shape2_rev))
+    for i in range(min(len(shape1_rev), len(shape2_rev))):
+        if shape1_rev[i] > 1 and shape2_rev[i] > 1 and shape1_rev[i] != shape2_rev[i]:
+            raise IndexingError(f"Cannot broadcast two tensors along dim={i} with shapes {shape1_rev[i]} and {shape2_rev[i]}")
+        broadcasted_shape[i] = max(shape1_rev[i], shape2_rev[i])
+    if len(shape1_rev) != len(shape2_rev):
+        shape_rest = shape1_rev if len(shape1_rev) > len(shape2_rev) else shape2_rev
+        for i in range(min(len(shape1_rev), len(shape2_rev)), len(broadcasted_shape)):
+            broadcasted_shape[i] = shape_rest[i]
+    return tuple(broadcasted_shape[::-1])
 
 def strides_from_shape(shape: UserShape) -> UserStrides:
     layout = [1]
@@ -209,7 +221,7 @@ class TensorData:
         Permute the dimensions of the tensor.
 
         Args:
-            *order: a permutation of the dimensions
+            order (list): a permutation of the dimensions
 
         Returns:
             New `TensorData` with the same storage and a new dimension order.
@@ -218,7 +230,9 @@ class TensorData:
             range(len(self.shape))
         ), f"Must give a position to each dimension. Shape: {self.shape} Order: {order}"
 
-        raise NotImplementedError("Need to include this file from past assignment.")
+        new_shape = tuple(self.shape[i] for i in order)
+        new_strides = tuple(self.strides[i] for i in order)
+        return TensorData(self._storage, new_shape, new_strides)
 
     def to_string(self) -> str:
         s = ""
